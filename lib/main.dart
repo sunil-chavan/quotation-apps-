@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -561,4 +560,651 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Gurukrupa Quotations', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           IconButton(
-       
+            icon: const Icon(Icons.settings),
+            tooltip: 'Business & Bank Settings',
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (val) => setState(() => _filter(val)),
+              decoration: InputDecoration(
+                hintText: 'Search client, event, or # number...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _filter(''));
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _filteredDocs.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.description_outlined, size: 64, color: Colors.grey.shade400),
+                            const SizedBox(height: 12),
+                            Text('No Quotations Yet', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
+                            const SizedBox(height: 4),
+                            const Text('Tap "+ New" below to create your first quote'),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.only(left: 12, right: 12, bottom: 80),
+                        itemCount: _filteredDocs.length,
+                        itemBuilder: (context, index) {
+                          final doc = _filteredDocs[index];
+                          final isInvoice = doc.docType == 'INVOICE';
+                          return Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: isInvoice ? Colors.green.shade100 : Colors.orange.shade100,
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          '${doc.docType} #${doc.docNumber}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                            color: isInvoice ? Colors.green.shade900 : Colors.orange.shade900,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(doc.date, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(doc.clientName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                  if (doc.eventTitle.isNotEmpty)
+                                    Text(doc.eventTitle, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+                                  const Divider(height: 16),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Total: ₹${_currency.format(doc.total)}',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                          if (doc.advancePaid > 0)
+                                            Text('Due: ₹${_currency.format(doc.balanceDue)}',
+                                                style: const TextStyle(color: Colors.red, fontSize: 12)),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.picture_as_pdf, color: Color(0xFF8B1E24)),
+                                            tooltip: 'Share PDF',
+                                            onPressed: () async {
+                                              final profile = await BusinessProfile.load();
+                                              await PdfService.generateAndShare(doc, profile);
+                                            },
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.edit, color: Colors.blue),
+                                            tooltip: 'Edit',
+                                            onPressed: () async {
+                                              await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(builder: (_) => FormScreen(existingDoc: doc)),
+                                              );
+                                              _loadData();
+                                            },
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.copy, color: Colors.teal),
+                                            tooltip: 'Duplicate',
+                                            onPressed: () => _duplicateDoc(doc),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                            tooltip: 'Delete',
+                                            onPressed: () => _deleteDoc(doc),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFF8B1E24),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('New Quote'),
+        onPressed: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => const FormScreen()));
+          _loadData();
+        },
+      ),
+    );
+  }
+}
+
+// ==================== CREATE / EDIT FORM SCREEN ====================
+
+class FormScreen extends StatefulWidget {
+  final QuotationDoc? existingDoc;
+  const FormScreen({super.key, this.existingDoc});
+
+  @override
+  State<FormScreen> createState() => _FormScreenState();
+}
+
+class _FormScreenState extends State<FormScreen> {
+  final _formKey = GlobalKey<FormState>();
+  String _docType = 'QUOTATION';
+  final _docNumCtrl = TextEditingController();
+  final _dateCtrl = TextEditingController();
+  final _clientNameCtrl = TextEditingController();
+  final _clientAddrCtrl = TextEditingController();
+  final _eventTitleCtrl = TextEditingController();
+  final _taxCtrl = TextEditingController(text: '0');
+  final _advanceCtrl = TextEditingController(text: '0');
+  final _notesCtrl = TextEditingController();
+  List<LineItem> _items = [];
+  final _currency = NumberFormat('#,##0.00', 'en_IN');
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.existingDoc != null) {
+      final d = widget.existingDoc!;
+      _docType = d.docType;
+      _docNumCtrl.text = d.docNumber.toString();
+      _dateCtrl.text = d.date;
+      _clientNameCtrl.text = d.clientName;
+      _clientAddrCtrl.text = d.clientAddress;
+      _eventTitleCtrl.text = d.eventTitle;
+      _taxCtrl.text = d.taxPercent.toString();
+      _advanceCtrl.text = d.advancePaid.toString();
+      _notesCtrl.text = d.notes;
+      _items = d.items.map((e) => LineItem(name: e.name, quantity: e.quantity, rate: e.rate)).toList();
+    } else {
+      _dateCtrl.text = DateFormat('MMM dd, yyyy').format(DateTime.now());
+      _initNextNumber();
+      _items.add(LineItem(name: 'Stage 16x20 ft', quantity: 1, rate: 5000));
+    }
+  }
+
+  Future<void> _initNextNumber() async {
+    final next = await DBHelper.getNextDocNumber();
+    if (mounted) setState(() => _docNumCtrl.text = next.toString());
+  }
+
+  double get _subtotal => _items.fold(0.0, (s, i) => s + i.amount);
+  double get _taxAmt => _subtotal * ((double.tryParse(_taxCtrl.text) ?? 0) / 100);
+  double get _total => _subtotal + _taxAmt;
+  double get _balance => _total - (double.tryParse(_advanceCtrl.text) ?? 0);
+
+  void _openItemDialog({LineItem? item, int? index}) {
+    final nameCtrl = TextEditingController(text: item?.name ?? '');
+    final qtyCtrl = TextEditingController(text: item != null ? item.quantity.toString() : '1');
+    final rateCtrl = TextEditingController(text: item != null ? item.rate.toString() : '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(item == null ? 'Add Item' : 'Edit Item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Item Name / Size (e.g. Sound System)'),
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: qtyCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Quantity'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: rateCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Rate (₹)'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (nameCtrl.text.trim().isEmpty) return;
+              final newItem = LineItem(
+                name: nameCtrl.text.trim(),
+                quantity: double.tryParse(qtyCtrl.text) ?? 1,
+                rate: double.tryParse(rateCtrl.text) ?? 0,
+              );
+              setState(() {
+                if (index != null) {
+                  _items[index] = newItem;
+                } else {
+                  _items.add(newItem);
+                }
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save Item'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save({bool sharePdf = false}) async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please add at least 1 item')));
+      return;
+    }
+
+    final doc = QuotationDoc(
+      id: widget.existingDoc?.id,
+      docType: _docType,
+      docNumber: int.tryParse(_docNumCtrl.text) ?? 1,
+      date: _dateCtrl.text.trim(),
+      clientName: _clientNameCtrl.text.trim(),
+      clientAddress: _clientAddrCtrl.text.trim(),
+      eventTitle: _eventTitleCtrl.text.trim(),
+      taxPercent: double.tryParse(_taxCtrl.text) ?? 0,
+      advancePaid: double.tryParse(_advanceCtrl.text) ?? 0,
+      notes: _notesCtrl.text.trim(),
+      items: _items,
+    );
+
+    if (doc.id == null) {
+      await DBHelper.insert(doc);
+    } else {
+      await DBHelper.update(doc);
+    }
+
+    if (sharePdf) {
+      final profile = await BusinessProfile.load();
+      await PdfService.generateAndShare(doc, profile);
+    }
+
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.existingDoc == null ? 'Create $_docType' : 'Edit $_docType #${_docNumCtrl.text}'),
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            // Type Toggle
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'QUOTATION', label: Text('QUOTATION'), icon: Icon(Icons.request_quote)),
+                ButtonSegment(value: 'INVOICE', label: Text('INVOICE'), icon: Icon(Icons.receipt_long)),
+              ],
+              selected: {_docType},
+              onSelectionChanged: (s) => setState(() => _docType = s.first),
+            ),
+            const SizedBox(height: 14),
+
+            // Doc Number & Date
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _docNumCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Number (#)', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: _dateCtrl,
+                    readOnly: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Date',
+                      border: OutlineInputBorder(),
+                      suffixIcon: Icon(Icons.calendar_today),
+                    ),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2035),
+                      );
+                      if (picked != null) {
+                        setState(() => _dateCtrl.text = DateFormat('MMM dd, yyyy').format(picked));
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Client Details
+            TextFormField(
+              controller: _clientNameCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Client / Company Name *', border: OutlineInputBorder()),
+              validator: (v) => v == null || v.trim().isEmpty ? 'Client name required' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _clientAddrCtrl,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Client City / Address', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _eventTitleCtrl,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Event / Venue Title (e.g. 1st R&D Townhall)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Items Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Items List', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                FilledButton.icon(
+                  onPressed: () => _openItemDialog(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add Item'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Items List
+            ..._items.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final item = entry.value;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('Qty: ${item.quantity}  ×  Rate: ₹${_currency.format(item.rate)}'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('₹${_currency.format(item.amount)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
+                        onPressed: () => _openItemDialog(item: item, index: idx),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20, color: Colors.red),
+                        onPressed: () => setState(() => _items.removeAt(idx)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 12),
+            // Tax & Advance
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _taxCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'Tax (%)', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: _advanceCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'Advance Paid (₹)', border: OutlineInputBorder()),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Notes
+            TextFormField(
+              controller: _notesCtrl,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: 'Notes (Optional)', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 14),
+
+            // Summary Box
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Column(
+                children: [
+                  _row('Subtotal', '₹${_currency.format(_subtotal)}'),
+                  _row('Tax', '₹${_currency.format(_taxAmt)}'),
+                  _row('Total Amount', '₹${_currency.format(_total)}', bold: true),
+                  _row('Balance Due', '₹${_currency.format(_balance)}', bold: true, color: const Color(0xFF8B1E24)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // Save Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _save(sharePdf: false),
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save Only'),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _save(sharePdf: true),
+                    icon: const Icon(Icons.share),
+                    label: const Text('Save & PDF'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1E24),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String k, String v, {bool bold = false, Color? color}) {
+    final s = TextStyle(fontSize: bold ? 15 : 13.5, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(k, style: s), Text(v, style: s)]),
+    );
+  }
+}
+
+// ==================== SETTINGS SCREEN (BUSINESS & BANK DETAILS) ====================
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _firmCtrl = TextEditingController();
+  final _tagCtrl = TextEditingController();
+  final _propCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
+  final _panCtrl = TextEditingController();
+  final _bankCtrl = TextEditingController();
+  final _holderCtrl = TextEditingController();
+  final _accCtrl = TextEditingController();
+  final _ifscCtrl = TextEditingController();
+  final _branchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final p = await BusinessProfile.load();
+    setState(() {
+      _firmCtrl.text = p.firmName;
+      _tagCtrl.text = p.tagline;
+      _propCtrl.text = p.proprietor;
+      _phoneCtrl.text = p.phone;
+      _cityCtrl.text = p.city;
+      _panCtrl.text = p.pan;
+      _bankCtrl.text = p.bankName;
+      _holderCtrl.text = p.accountHolder;
+      _accCtrl.text = p.accountNumber;
+      _ifscCtrl.text = p.ifsc;
+      _branchCtrl.text = p.branch;
+    });
+  }
+
+  Future<void> _save() async {
+    final p = BusinessProfile(
+      firmName: _firmCtrl.text.trim(),
+      tagline: _tagCtrl.text.trim(),
+      proprietor: _propCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim(),
+      city: _cityCtrl.text.trim(),
+      pan: _panCtrl.text.trim(),
+      bankName: _bankCtrl.text.trim(),
+      accountHolder: _holderCtrl.text.trim(),
+      accountNumber: _accCtrl.text.trim(),
+      ifsc: _ifscCtrl.text.trim(),
+      branch: _branchCtrl.text.trim(),
+    );
+    await p.save();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings Saved!')));
+      Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Business & Bank Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          const Text('Firm Information', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          _field(_firmCtrl, 'Firm Name'),
+          _field(_tagCtrl, 'Tagline'),
+          _field(_propCtrl, 'Proprietor Name'),
+          _field(_phoneCtrl, 'Mobile Number'),
+          _field(_cityCtrl, 'City / Address'),
+          const SizedBox(height: 14),
+          const Text('Bank Details (Printed on PDF)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          _field(_panCtrl, 'PAN Number'),
+          _field(_bankCtrl, 'Bank Name'),
+          _field(_holderCtrl, 'Account Holder Name'),
+          _field(_accCtrl, 'Account Number'),
+          _field(_ifscCtrl, 'IFSC Code'),
+          _field(_branchCtrl, 'Branch'),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save),
+            label: const Text('Save Settings'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1E24),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController ctrl, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: ctrl,
+        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      ),
+    );
+  }
+}
